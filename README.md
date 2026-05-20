@@ -1,5 +1,5 @@
 # ResQ Link 🚨
-**A centralized Disaster Resource Management System bridging the gap between victims and response teams.**
+**A centralized Disaster monitoring and Resource Management System bridging the gap between victims and response teams.**
 
 ## The Problem
 Traditional disaster management fails due to **fragmentation, delayed responses, and lack of real-time data**. Victims struggle to request help, and resources are often misallocated during critical windows.
