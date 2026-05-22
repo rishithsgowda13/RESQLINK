@@ -299,6 +299,10 @@ function initDashboard() {
 
         // Refresh active requests every 5 seconds
         setInterval(() => {
+            const savedRequests = localStorage.getItem('drmsRequests');
+            if (savedRequests) {
+                requests = JSON.parse(savedRequests);
+            }
             renderRequests();
             updateStats();
         }, 5000);
@@ -315,7 +319,24 @@ function initDashboard() {
     }
 }
 
+function saveToLocalStorage() {
+    localStorage.setItem('drmsRequests', JSON.stringify(requests));
+    localStorage.setItem('drmsResources', JSON.stringify(resources));
+    localStorage.setItem('drmsNextRequestId', nextRequestId.toString());
+}
+
 function loadDummyData() {
+    const savedRequests = localStorage.getItem('drmsRequests');
+    const savedResources = localStorage.getItem('drmsResources');
+    const savedNextId = localStorage.getItem('drmsNextRequestId');
+
+    if (savedRequests && savedResources) {
+        requests = JSON.parse(savedRequests);
+        resources = JSON.parse(savedResources);
+        if (savedNextId) nextRequestId = parseInt(savedNextId);
+        return;
+    }
+
     // Calculate smart priorities for dummy data
     const getRandomOffset = () => (Math.random() * 0.04) - 0.02;
 
@@ -430,6 +451,8 @@ function loadDummyData() {
         { id: 4, name: "Rescue Personnel", type: "Rescue Team", totalQuantity: 50, availableQuantity: 40 },
         { id: 5, name: "Emergency Ambulances", type: "Ambulance", totalQuantity: 20, availableQuantity: 15 }
     ];
+    
+    saveToLocalStorage();
 }
 
 function initMap(mapId = 'map', enableScrollZoom = true) {
@@ -520,6 +543,7 @@ function initForm() {
         };
 
         requests.push(newRequest);
+        saveToLocalStorage();
 
         form.reset();
         if (emergencyMarker) {
@@ -565,9 +589,8 @@ function initUserForm() {
         const severity = parseInt(document.getElementById('userSeverity').value);
         const individualsAffected = parseInt(document.getElementById('userIndividualsAffected').value);
         const description = document.getElementById('userDescription').value.trim();
-
-        const contactPerson = currentUser ? currentUser.fullName : "User";
-        const contactPhone = "N/A";
+        const contactPerson = document.getElementById('userContactPerson').value.trim();
+        const contactPhone = document.getElementById('userContactPhone').value.trim();
 
         const mlResult = calculateMLPriority(resourceType, individualsAffected, severity);
         const priorityScore = mlResult.priorityScore;
@@ -595,6 +618,7 @@ function initUserForm() {
         };
 
         requests.push(newRequest);
+        saveToLocalStorage();
 
         form.reset();
         if (emergencyMarker) {
@@ -1117,6 +1141,7 @@ document.getElementById('allocateForm').addEventListener('submit', function (e) 
         request.status = 'partial';
     }
 
+    saveToLocalStorage();
     closeAllocateModal();
     renderRequests();
     renderResources();
@@ -1135,6 +1160,7 @@ function markResolved(requestId) {
     if (confirm(`Mark request ${request.requestId} as resolved?`)) {
         request.status = 'resolved';
         request.resolvedAt = new Date().toISOString();
+        saveToLocalStorage();
         renderRequests();
         updateStats();
         if (currentUser.role === 'Admin') {
@@ -1149,6 +1175,7 @@ function deleteRequest(requestId) {
 
     if (confirm(`Delete request ${request.requestId}?`)) {
         requests = requests.filter(r => r.id !== requestId);
+        saveToLocalStorage();
         renderRequests();
         updateStats();
         if (currentUser.role === 'Admin') {
@@ -1248,6 +1275,7 @@ document.getElementById('resourceForm').addEventListener('submit', function (e) 
         resources.push(newResource);
     }
 
+    saveToLocalStorage();
     closeResourceModal();
     renderResources();
     if (currentUser.role === 'Admin') {
@@ -1261,6 +1289,7 @@ function deleteResource(resourceId) {
 
     if (confirm(`Delete resource "${resource.name}"?`)) {
         resources = resources.filter(r => r.id !== resourceId);
+        saveToLocalStorage();
         renderResources();
         if (currentUser.role === 'Admin') {
             updateAnalytics();

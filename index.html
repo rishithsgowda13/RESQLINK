@@ -2133,6 +2133,17 @@
                             <input type="number" id="userIndividualsAffected" class="form-control" required min="1">
                         </div>
 
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="userContactPerson">Contact Person Name</label>
+                                <input type="text" id="userContactPerson" class="form-control" required placeholder="e.g. John Doe">
+                            </div>
+                            <div class="form-group">
+                                <label for="userContactPhone">Contact Phone</label>
+                                <input type="tel" id="userContactPhone" class="form-control" required pattern="\d{10}" maxlength="10" title="Phone number must be exactly 10 digits" placeholder="10-digit number">
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label for="userDescription">Description</label>
                             <textarea id="userDescription" class="form-control" rows="3" required></textarea>
@@ -2315,7 +2326,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=7"></script>
 </body>
 
 </html>
