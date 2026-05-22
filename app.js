@@ -2,6 +2,7 @@
 let currentUser = null;
 let requests = [];
 let resources = [];
+let volunteers = [];
 let registeredUsers = [];
 let map = null;
 let baseMarker = null;
@@ -40,6 +41,188 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 const WEATHER_API_KEY = "ffc79bc9d96b20005a62a24e1f39113a";
+let sbClient = null;
+
+// --- Supabase Configuration ---
+async function initSupabase() {
+    try {
+        const response = await fetch('/config');
+        const config = await response.json();
+        
+        if (config.SUPABASE_URL && config.SUPABASE_ANON_KEY) {
+            sbClient = supabase.createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
+            console.log("✅ Supabase Initialized");
+            setupSupabaseRealtime();
+        } else {
+            console.error("❌ Supabase config missing");
+        }
+    } catch (error) {
+        console.error("❌ Error loading Supabase config:", error);
+    }
+}
+
+function setupSupabaseRealtime() {
+    if (!sbClient) return;
+
+    // Subscribe to real-time changes in sensor_logs table
+    const channel = sbClient
+        .channel('sensor_logs_changes')
+        .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'sensor_logs' },
+            (payload) => {
+                console.log('New sensor data:', payload.new);
+                updateHardwareUI(payload.new);
+            }
+        )
+        .subscribe();
+
+    // Fetch initial data
+    fetchLatestSensorData();
+}
+
+async function fetchLatestSensorData() {
+    if (!sbClient) return;
+    const { data, error } = await sbClient
+        .from('sensor_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+    if (data && data.length > 0) {
+        updateHardwareUI(data[0]);
+    }
+}
+
+function updateHardwareUI(data) {
+    const tempEl = document.getElementById('hwTemp');
+    const humEl = document.getElementById('hwHum');
+    const soilEl = document.getElementById('hwSoil');
+    const waterEl = document.getElementById('hwWater');
+    const seismicEl = document.getElementById('hwSeismic');
+    const airEl = document.getElementById('hwAir');
+    const rainEl = document.getElementById('hwRain');
+    const pressureEl = document.getElementById('hwPressure');
+    const altitudeEl = document.getElementById('hwAltitude');
+    const windSpeedEl = document.getElementById('hwWindSpeed');
+    const windDirEl = document.getElementById('hwWindDir');
+    const gpsEl = document.getElementById('hwGPS');
+    const alertEl = document.getElementById('hwAlert');
+    const updateEl = document.getElementById('hwLastUpdate');
+
+    const updateValue = (el, val, suffix = '', cardId) => {
+        if (!el) return;
+        const newVal = `${val}${suffix}`;
+        if (el.textContent !== newVal) {
+            el.textContent = newVal;
+            const card = document.getElementById(cardId);
+            if (card) {
+                card.classList.remove('data-flash');
+                void card.offsetWidth; // Trigger reflow
+                card.classList.add('data-flash');
+            }
+        }
+    };
+
+    updateValue(tempEl, data.temperature ? data.temperature.toFixed(1) : '0.0', '°C', 'hwCardTemp');
+    updateValue(humEl, data.humidity ? data.humidity.toFixed(1) : '0.0', '%', 'hwCardHum');
+    updateValue(soilEl, data.soil_moisture !== undefined ? data.soil_moisture : '0', '', 'hwCardSoil');
+    updateValue(waterEl, data.water_level ? data.water_level.toFixed(1) : '0.0', '', 'hwCardWater');
+    updateValue(seismicEl, data.seismic ? data.seismic.toFixed(2) : '0.00', ' m/s²', 'hwCardSeismic');
+    updateValue(airEl, data.air_quality ? data.air_quality.toFixed(0) : '0', '', 'hwCardAir');
+    updateValue(rainEl, data.rain_level ? data.rain_level.toFixed(0) : '0', '', 'hwCardRain');
+    updateValue(pressureEl, data.baro_pressure ? data.baro_pressure.toFixed(1) : '1013.2', ' hPa', 'hwCardPressure');
+    updateValue(altitudeEl, data.altitude ? data.altitude.toFixed(1) : '0.0', ' m', 'hwCardAltitude');
+    updateValue(windSpeedEl, data.wind_speed ? data.wind_speed.toFixed(1) : '0.0', ' km/h', 'hwCardWindSpeed');
+    updateValue(windDirEl, data.wind_direction ? data.wind_direction.toFixed(0) : '0', '°', 'hwCardWindDir');
+    
+    const latVal = data.latitude ? data.latitude : 0;
+    const lngVal = data.longitude ? data.longitude : 0;
+    const gpsVal = (latVal !== 0 && lngVal !== 0) ? `${latVal.toFixed(5)}, ${lngVal.toFixed(5)}` : 'No Signal / Fixed';
+    updateValue(gpsEl, gpsVal, '', 'hwCardGPS');
+    
+    const camOverlay = document.getElementById('camOverlay');
+    
+    if (updateEl) {
+        const date = data.created_at ? new Date(data.created_at) : new Date();
+        updateEl.textContent = date.toLocaleTimeString();
+    }
+
+    // Sync with Leaflet Map Base Station location if dynamic GPS coordinates are available
+    if (latVal !== 0 && lngVal !== 0) {
+        if (typeof BASE_LOCATION !== 'undefined') {
+            BASE_LOCATION.lat = latVal;
+            BASE_LOCATION.lng = lngVal;
+        }
+        if (typeof baseMarker !== 'undefined' && baseMarker) {
+            baseMarker.setLatLng([latVal, lngVal]);
+            baseMarker.bindPopup(`<b>📡 Dynamic ResQ Link Station</b><br>Lat: ${latVal.toFixed(6)}<br>Lng: ${lngVal.toFixed(6)}<br>Status: Online (GPS Match)`);
+        }
+    }
+
+    // Sync with User Dashboard elements if they exist
+    const userTemp = document.getElementById('userHwTemp');
+    const userHum = document.getElementById('userHwHum');
+    const userSeismic = document.getElementById('userHwSeismic');
+    const userWater = document.getElementById('userHwWater');
+    const userSoil = document.getElementById('userHwSoil');
+    const userAir = document.getElementById('userHwAir');
+    const userRain = document.getElementById('userHwRain');
+    const userPressure = document.getElementById('userHwPressure');
+    const userAltitude = document.getElementById('userHwAltitude');
+    const userWindSpeed = document.getElementById('userHwWindSpeed');
+    const userWindDir = document.getElementById('userHwWindDir');
+    const userGPS = document.getElementById('userHwGPS');
+
+    if (userTemp) userTemp.textContent = (data.temperature ? data.temperature.toFixed(1) : '0.0') + '°C';
+    if (userHum) userHum.textContent = (data.humidity ? data.humidity.toFixed(1) : '0.0') + '%';
+    if (userSeismic) userSeismic.textContent = (data.seismic ? data.seismic.toFixed(2) : '0.00') + ' m/s²';
+    if (userWater) userWater.textContent = (data.water_level ? data.water_level.toFixed(1) : '0.0');
+    if (userSoil) userSoil.textContent = data.soil_moisture !== undefined ? data.soil_moisture : '0';
+    if (userAir) userAir.textContent = data.air_quality ? data.air_quality.toFixed(0) : '0';
+    if (userRain) userRain.textContent = data.rain_level ? data.rain_level.toFixed(0) : '0';
+    if (userPressure) userPressure.textContent = (data.baro_pressure ? data.baro_pressure.toFixed(1) : '1013.2') + ' hPa';
+    if (userAltitude) userAltitude.textContent = (data.altitude ? data.altitude.toFixed(1) : '0.0') + ' m';
+    if (userWindSpeed) userWindSpeed.textContent = (data.wind_speed ? data.wind_speed.toFixed(1) : '0.0') + ' km/h';
+    if (userWindDir) userWindDir.textContent = (data.wind_direction ? data.wind_direction.toFixed(0) : '0') + '°';
+    if (userGPS) userGPS.textContent = gpsVal;
+
+    if (alertEl) {
+        if (data.status && data.status !== "Updated") {
+            alertEl.style.display = 'block';
+            alertEl.textContent = `🚨 ALERT: ${data.status}`;
+            const isCritical = data.status.includes('Flood') || 
+                               data.status.includes('Drought') || 
+                               data.status.includes('Earthquake') || 
+                               data.status.includes('Smoke') || 
+                               data.status.includes('Storm') || 
+                               data.status.includes('Heavy Rain');
+            alertEl.style.background = isCritical ? '#fee2e2' : '#fef3c7';
+            alertEl.style.color = isCritical ? '#991b1b' : '#92400e';
+            alertEl.style.border = `1px solid ${isCritical ? '#f87171' : '#fbbf24'}`;
+            
+            if (isCritical) {
+                if (camOverlay) camOverlay.style.display = 'block';
+                takeSnapshot(); // Automatic capture on alert
+            }
+        } else {
+            alertEl.style.display = 'none';
+            if (camOverlay) camOverlay.style.display = 'none';
+        }
+    }
+}
+
+function toggleHardware() {
+    const content = document.getElementById('hardwareContent');
+    const icon = document.getElementById('hardwareToggleIcon');
+    if (content.classList.contains('expanded')) {
+        content.classList.remove('expanded');
+        icon.style.transform = 'rotate(0deg)';
+    } else {
+        content.classList.add('expanded');
+        icon.style.transform = 'rotate(180deg)';
+    }
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function () {
@@ -63,6 +246,15 @@ function checkSavedSession() {
             localStorage.removeItem('drmsCurrentUser');
         }
     }
+}
+
+function fillDemoCredentials() {
+    document.getElementById('username').value = '1';
+    document.getElementById('password').value = '1';
+    // Small delay to visual feedback then submit
+    setTimeout(() => {
+        document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+    }, 300);
 }
 
 function initLogin() {
@@ -264,16 +456,19 @@ function initDashboard() {
 
         const weatherSection = document.getElementById('weatherSection');
         const aiDemandSection = document.getElementById('aiDemandSection');
+        const hardwareSection = document.getElementById('hardwareSection');
         const statsGrid = document.getElementById('statsGrid');
         const activeRequestsSection = document.getElementById('activeRequestsSection');
         const resolvedRequestsSection = document.getElementById('resolvedRequestsSection');
 
         if (weatherSection) weatherSection.style.display = 'block';
         if (aiDemandSection) aiDemandSection.style.display = 'block';
+        if (hardwareSection) hardwareSection.style.display = 'block';
         if (statsGrid) statsGrid.style.display = 'grid';
         if (activeRequestsSection) activeRequestsSection.style.display = 'block';
-        if (activeRequestsSection) activeRequestsSection.style.display = 'block';
         if (resolvedRequestsSection) resolvedRequestsSection.style.display = 'block';
+
+        initSupabase();
 
         const liveSheetSection = document.getElementById('liveSheetSection');
         if (liveSheetSection) liveSheetSection.style.display = 'block';
@@ -418,6 +613,12 @@ function loadDummyData() {
         { id: 4, name: "Rescue Personnel", type: "Rescue Team", totalQuantity: 50, availableQuantity: 40 },
         { id: 5, name: "Emergency Ambulances", type: "Ambulance", totalQuantity: 20, availableQuantity: 15 }
     ];
+
+    volunteers = [
+        { id: 1, name: "Dr. Sandeep", role: "Medical", status: "available", lat: BASE_LOCATION.lat + 0.01, lng: BASE_LOCATION.lng + 0.01, phone: "9123456780" },
+        { id: 2, name: "Kiran Kumar", role: "Rescue", status: "busy", lat: BASE_LOCATION.lat - 0.01, lng: BASE_LOCATION.lng + 0.02, phone: "9123456781" },
+        { id: 3, name: "Arjun Singh", role: "Driver", status: "available", lat: BASE_LOCATION.lat + 0.02, lng: BASE_LOCATION.lng - 0.01, phone: "9123456782" }
+    ];
 }
 
 function initMap(mapId = 'map', enableScrollZoom = true) {
@@ -453,6 +654,34 @@ function initMap(mapId = 'map', enableScrollZoom = true) {
             .addTo(map)
             .bindPopup('<b>Emergency Location</b><br>Lat: ' + e.latlng.lat.toFixed(6) + '<br>Lng: ' + e.latlng.lng.toFixed(6));
     });
+}
+
+function showAdminDashboard() {
+    document.getElementById('adminDashboard').style.display = 'block';
+    document.getElementById('userDashboard').style.display = 'none';
+    
+    // Ensure all admin sections are properly updated
+    renderRequests();
+    renderResources();
+    renderVolunteers();
+    updateStats();
+    updateAnalytics();
+    updateVolunteerMarkers();
+    initSheetRefresh();
+}
+
+function showUserDashboard() {
+    document.getElementById('adminDashboard').style.display = 'none';
+    document.getElementById('userDashboard').style.display = 'block';
+    
+    // For User, we only show specific sections
+    renderResources();
+    updateVolunteerMarkers();
+    
+    // Re-init user map if needed
+    setTimeout(() => {
+        if (userMap) userMap.invalidateSize();
+    }, 100);
 }
 
 function initForm() {
@@ -1032,7 +1261,7 @@ function openAllocateModal(requestId) {
     document.getElementById('allocateIndividualsInfo').textContent = request.individualsAffected || 'N/A';
     document.getElementById('allocateSeverityInfo').textContent = request.severity || 'N/A';
     document.getElementById('allocatePriorityInfo').textContent = request.mlPriorityClass ? request.mlPriorityClass.toUpperCase() : 'N/A';
-    document.getElementById('allocateDescriptionInfo').textContent = request.description || 'No description available';
+                    document.getElementById('allocateDescriptionInfo').textContent = request.description || 'No description available';
 
     document.getElementById('allocateModal').style.display = 'flex';
 }
@@ -1253,6 +1482,8 @@ function updateAnalytics() {
     document.getElementById('totalIndividuals').textContent = totalIndividuals;
     document.getElementById('resourceUtilization').textContent = utilization + '%';
     document.getElementById('avgResponseTime').textContent = 'N/A';
+    
+    updateInventoryForecasting();
 }
 
 // Sort requests by risk level
@@ -1293,4 +1524,468 @@ function initSheetRefresh() {
             }
         }
     }, interval);
+}
+
+// SOS Panic Feature
+async function sendSOS() {
+    if (!confirm("🚨 ARE YOU SURE? This will send an immediate SOS alert with your current location to the emergency response team.")) {
+        return;
+    }
+
+    const sosButton = document.querySelector('.btn-sos');
+    const originalContent = sosButton.innerHTML;
+    sosButton.disabled = true;
+    sosButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>...</span>';
+
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser. Please submit a manual request.");
+        sosButton.disabled = false;
+        sosButton.innerHTML = originalContent;
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        const newRequest = {
+            id: requests.length + 1,
+            requestId: `SOS-${Date.now().toString().slice(-4)}`,
+            resourceType: "CRITICAL SOS",
+            quantityRequested: 1,
+            quantityAllocated: 0,
+            quantityPending: 1,
+            lat: lat,
+            lng: lng,
+            severity: 5,
+            individualsAffected: 1,
+            status: 'pending',
+            priorityScore: 150.0, // Absolute maximum priority
+            mlPriorityClass: 'critical',
+            mlConfidence: 0.99,
+            contactPerson: currentUser ? (currentUser.fullName || currentUser.username) : "Anonymous User",
+            contactPhone: "GEO-LOCATED",
+            description: "🚨 EMERGENCY SOS: User has triggered a panic alert from their mobile device. Immediate response required at GPS coordinates."
+        };
+
+        // Add to local state
+        requests.unshift(newRequest); // Add to top
+
+        // Update UI
+        if (currentUser.role === 'Admin') {
+            renderRequests();
+            updateStats();
+            updateAnalytics();
+        }
+
+        // Send Telegram Alert
+        const botToken = "8683344314:AAETE34zer-DgxDcDqa56Vi_sJ8MQeCSRQc";
+        const chatID = "7988893018";
+        const msg = `🚨 *CRITICAL SOS ALERT*\n\nUser: ${newRequest.contactPerson}\nLocation: https://www.google.com/maps?q=${lat},${lng}\nStatus: IMMEDIATE RESPONSE REQUIRED`;
+        
+        try {
+            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: chatID,
+                    text: msg,
+                    parse_mode: 'Markdown'
+                })
+            });
+        } catch (err) {
+            console.error("Telegram SOS failed:", err);
+        }
+
+        alert("🚨 SOS ALERT SENT! Emergency teams have been notified of your location. Please stay where you are if safe.");
+        
+        sosButton.disabled = false;
+        sosButton.innerHTML = originalContent;
+
+        // Visual feedback on the map
+        if (map) {
+            if (emergencyMarker) map.removeLayer(emergencyMarker);
+            emergencyMarker = L.marker([lat, lng]).addTo(map)
+                .bindPopup('<b>🚨 SOS LOCATION</b>').openPopup();
+            map.setView([lat, lng], 15);
+        }
+
+    }, (error) => {
+        let errorMsg = "Unable to retrieve your location.";
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                errorMsg = "User denied the request for Geolocation. Please enable location permissions.";
+                break;
+            case error.POSITION_UNAVAILABLE:
+                errorMsg = "Location information is unavailable.";
+                break;
+            case error.TIMEOUT:
+                errorMsg = "The request to get user location timed out.";
+                break;
+        }
+        alert(errorMsg);
+        sosButton.disabled = false;
+        sosButton.innerHTML = originalContent;
+    }, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+    });
+}
+
+// Tactical Mode (Night Vision) Toggle
+function toggleTacticalMode() {
+    document.body.classList.toggle('tactical-mode');
+    const isActive = document.body.classList.contains('tactical-mode');
+    localStorage.setItem('tacticalMode', isActive);
+    
+    updateTacticalUI(isActive);
+}
+
+function updateTacticalUI(isActive) {
+    const btns = [document.getElementById('tacticalToggleAdmin'), document.getElementById('tacticalToggleUser')];
+    btns.forEach(btn => {
+        if (btn) {
+            btn.querySelector('span').textContent = isActive ? 'Normal Mode' : 'Tactical Mode';
+            btn.querySelector('i').className = isActive ? 'fas fa-eye-slash' : 'fas fa-eye';
+            btn.style.color = isActive ? '#fff' : '#ff0000';
+            btn.style.background = isActive ? '#900' : '#333';
+        }
+    });
+}
+
+// Initialize Tactical Mode on page load
+function initTacticalMode() {
+    const isTactical = localStorage.getItem('tacticalMode') === 'true';
+    if (isTactical) {
+        document.body.classList.add('tactical-mode');
+        updateTacticalUI(true);
+    }
+}
+
+// Add to DOMContentLoaded
+document.addEventListener('DOMContentLoaded', () => {
+    initTacticalMode();
+    initLanguage();
+});
+
+// --- Multilingual Support ---
+const TRANSLATIONS = {
+    en: {
+        title: "ResQ Link",
+        base: "Base: Vidya Vardhaka College of Engineering",
+        hw_title: "Live Hardware Monitoring (Supabase)",
+        temp: "Temperature",
+        hum: "Humidity",
+        soil: "Soil Moisture",
+        water: "Water Level",
+        seismic: "Seismic Activity",
+        air: "Air Quality",
+        rain: "Rain Intensity",
+        submit_req: "Submit Emergency Request",
+        res_type: "Resource Type",
+        qty: "Quantity",
+        severity: "Severity (1-5)",
+        affected: "Individuals Affected",
+        desc: "Description",
+        submit_btn: "Submit Request",
+        sos_btn: "SOS",
+        sos_label: "Instant Emergency Help",
+        logout: "Logout",
+        active_req: "Active Emergency Requests",
+        resolved_req: "Resolved Requests",
+        avail_res: "Available Resources"
+    },
+    kn: {
+        title: "ರೆಸ್ಕ್ಯೂ ಲಿಂಕ್",
+        base: "ನೆಲೆ: ವಿದ್ಯಾವರ್ಧಕ ಎಂಜಿನಿಯರಿಂಗ್ ಕಾಲೇಜು",
+        hw_title: "ಲೈವ್ ಹಾರ್ಡ್‌ವೇರ್ ಮಾನಿಟರಿಂಗ್ (ಸುಪಬೇಸ್)",
+        temp: "ತಾಪಮಾನ",
+        hum: "ಆರ್ದ್ರತೆ",
+        soil: "ಮಣ್ಣಿನ ತೇವಾಂಶ",
+        water: "ನೀರಿನ ಮಟ್ಟ",
+        seismic: "ಭೂಕಂಪನ ಚಟುವಟಿಕೆ",
+        air: "ಗಾಳಿಯ ಗುಣಮಟ್ಟ",
+        rain: "ಮಳೆಯ ತೀವ್ರತೆ",
+        submit_req: "ತುರ್ತು ವಿನಂತಿಯನ್ನು ಸಲ್ಲಿಸಿ",
+        res_type: "ಸಂಪನ್ಮೂಲ ಪ್ರಕಾರ",
+        qty: "ಪ್ರಮಾಣ",
+        severity: "ತೀವ್ರತೆ (1-5)",
+        affected: "ಪೀಡಿತ ವ್ಯಕ್ತಿಗಳು",
+        desc: "ವಿವರಣೆ",
+        submit_btn: "ವಿನಂತಿಯನ್ನು ಸಲ್ಲಿಸಿ",
+        sos_btn: "ಎಸ್ಒಎಸ್",
+        sos_label: "ತತ್ಕ್ಷಣ ತುರ್ತು ಸಹಾಯ",
+        logout: "ನಿರ್ಗಮಿಸಿ",
+        active_req: "ಸಕ್ರಿಯ ತುರ್ತು ವಿನಂತಿಗಳು",
+        resolved_req: "ಪರಿಹರಿಸಲಾದ ವಿನಂತಿಗಳು",
+        avail_res: "ಲಭ್ಯವಿರುವ ಸಂಪನ್ಮೂಲಗಳು"
+    }
+};
+
+let currentLang = 'en';
+
+function toggleLanguage() {
+    currentLang = currentLang === 'en' ? 'kn' : 'en';
+    localStorage.setItem('resqlink_lang', currentLang);
+    applyLanguage(currentLang);
+}
+
+function applyLanguage(lang) {
+    const t = TRANSLATIONS[lang];
+    
+    // Update main titles
+    document.querySelectorAll('h1').forEach(el => {
+        if (el.textContent.includes("ResQ Link") || el.textContent.includes("ರೆಸ್ಕ್ಯೂ ಲಿಂಕ್")) el.textContent = t.title;
+    });
+
+    document.querySelectorAll('span').forEach(el => {
+        if (el.textContent.includes("Vidya Vardhaka") || el.textContent.includes("ವಿದ್ಯಾವರ್ಧಕ")) el.textContent = t.base;
+    });
+
+    // Update Headers
+    const hwHeaders = document.querySelectorAll('h2');
+    hwHeaders.forEach(h => {
+        if (h.textContent.includes("Hardware Monitoring") || h.textContent.includes("ಹಾರ್ಡ್‌ವೇರ್ ಮಾನಿಟರಿಂಗ್")) {
+            h.innerHTML = `<i class="fas fa-microchip" style="color: #c85a54;"></i> ${t.hw_title}`;
+        }
+        if (h.textContent.includes("Emergency Request") || h.textContent.includes("ವಿನಂತಿಯನ್ನು ಸಲ್ಲಿಸಿ")) {
+            h.textContent = t.submit_req;
+        }
+        if (h.textContent.includes("Available Resources") || h.textContent.includes("ಸಂಪನ್ಮೂಲಗಳು")) {
+            h.innerHTML = `<i class="fas fa-boxes"></i> ${t.avail_res}`;
+        }
+    });
+
+    // Update Labels
+    const labels = document.querySelectorAll('label');
+    labels.forEach(l => {
+        if (l.textContent === "Resource Type") l.textContent = t.res_type;
+        if (l.textContent === "Quantity") l.textContent = t.qty;
+        if (l.textContent.includes("Severity")) l.textContent = t.severity;
+        if (l.textContent === "Individuals Affected") l.textContent = t.affected;
+        if (l.textContent === "Description") l.textContent = t.desc;
+    });
+
+    // Update Hardware Cards
+    const hwCards = {
+        'hwCardTemp': t.temp,
+        'hwCardHum': t.hum,
+        'hwCardSoil': t.soil,
+        'hwCardWater': t.water,
+        'hwCardSeismic': t.seismic,
+        'hwCardAir': t.air,
+        'hwCardRain': t.rain
+    };
+
+    for (const [id, label] of Object.entries(hwCards)) {
+        const card = document.getElementById(id);
+        if (card) {
+            const h3 = card.querySelector('h3');
+            if (h3) h3.textContent = label;
+        }
+    }
+
+    // Update Buttons
+    const sosBtns = document.querySelectorAll('.btn-sos span');
+    sosBtns.forEach(btn => btn.textContent = t.sos_btn);
+    
+    const sosLabels = document.querySelectorAll('.sos-label');
+    sosLabels.forEach(l => l.textContent = t.sos_label);
+
+    const submitBtns = document.querySelectorAll('button[type="submit"]');
+    submitBtns.forEach(btn => {
+        if (btn.textContent.includes("Submit Request") || btn.textContent.includes("ವಿನಂತಿಯನ್ನು ಸಲ್ಲಿಸಿ")) {
+            btn.textContent = t.submit_btn;
+        }
+    });
+
+    const logoutBtns = document.querySelectorAll('.btn-logout');
+    logoutBtns.forEach(btn => btn.textContent = t.logout);
+
+    // Update Toggle Buttons
+    const langBtns = [document.getElementById('langToggleAdmin'), document.getElementById('langToggleUser')];
+    langBtns.forEach(btn => {
+        if (btn) btn.querySelector('span').textContent = lang === 'en' ? 'ಕನ್ನಡ' : 'English';
+    });
+}
+
+function initLanguage() {
+    const savedLang = localStorage.getItem('resqlink_lang');
+    if (savedLang) {
+        currentLang = savedLang;
+        applyLanguage(currentLang);
+    }
+}
+
+// Volunteer Management Logic
+function registerVolunteer(event) {
+    event.preventDefault();
+    
+    const name = document.getElementById('volName').value;
+    const role = document.getElementById('volRole').value;
+    const phone = document.getElementById('volPhone').value;
+
+    const newVol = {
+        id: volunteers.length + 1,
+        name: name,
+        role: role,
+        phone: phone,
+        status: 'available',
+        lat: BASE_LOCATION.lat + (Math.random() - 0.5) * 0.05,
+        lng: BASE_LOCATION.lng + (Math.random() - 0.5) * 0.05
+    };
+
+    volunteers.push(newVol);
+    alert(`Thank you ${newVol.name}! You are now registered as a ${newVol.role} volunteer. Your location has been pinned.`);
+    document.getElementById('volunteerForm').reset();
+    
+    if (currentUser.role === 'Admin') {
+        renderVolunteers();
+    }
+    updateVolunteerMarkers();
+}
+
+function renderVolunteers() {
+    const table = document.getElementById('volunteerTable');
+    if (!table) return;
+    table.innerHTML = '';
+
+    volunteers.forEach(v => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><strong>${v.name}</strong></td>
+            <td>${v.role}</td>
+            <td><span class="status-badge status-${v.status}">${v.status.toUpperCase()}</span></td>
+            <td>${v.phone}</td>
+            <td>
+                <button class="btn btn-primary btn-small" onclick="dispatchVolunteer(${v.id})">Dispatch</button>
+            </td>
+        `;
+        table.appendChild(row);
+    });
+}
+
+function updateVolunteerMarkers() {
+    if (!map) return;
+    
+    volunteers.forEach(v => {
+        const icon = L.divIcon({
+            className: 'volunteer-marker',
+            html: `<div style="background: ${v.status === 'available' ? '#10b981' : '#f59e0b'}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,255,100,0.5);"></div>`,
+            iconSize: [14, 14]
+        });
+
+        L.marker([v.lat, v.lng], { icon: icon })
+            .addTo(map)
+            .bindPopup(`<b>Volunteer: ${v.name}</b><br>Role: ${v.role}<br>Status: ${v.status}`);
+    });
+}
+
+function dispatchVolunteer(volId) {
+    const vol = volunteers.find(v => v.id === volId);
+    if (!vol) return;
+    
+    const activeRequests = requests.filter(r => r.status === 'pending');
+    if (activeRequests.length === 0) {
+        alert("No pending requests to dispatch to.");
+        return;
+    }
+
+    const req = activeRequests[0];
+    vol.status = 'busy';
+    alert(`Dispatched ${vol.name} to ${req.requestId} at ${req.resourceType} location.`);
+    
+    renderVolunteers();
+    updateVolunteerMarkers();
+}
+
+// Inventory Forecasting Logic
+function updateInventoryForecasting() {
+    const grid = document.getElementById('forecastingGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    resources.forEach(res => {
+        // Calculate burn rate based on requests (simulated)
+        const relevantRequests = requests.filter(r => r.resourceType === res.type);
+        const hourlyRate = (relevantRequests.length * 0.8) + (Math.random() * 2); 
+        
+        const hoursLeft = hourlyRate > 0 ? (res.availableQuantity / hourlyRate).toFixed(1) : "∞";
+        const status = hoursLeft < 12 ? "critical" : (hoursLeft < 24 ? "high" : "low");
+
+        const card = document.createElement('div');
+        card.className = `ai-demand-card forecast-${status}`;
+        card.style.padding = '15px';
+        card.style.borderRadius = '12px';
+        card.style.borderLeft = '5px solid ' + (status === 'critical' ? '#ff4444' : (status === 'high' ? '#ff8800' : '#00ff88'));
+        
+        card.innerHTML = `
+            <div style="font-weight: 700; margin-bottom: 5px;"><i class="fas fa-hourglass-half"></i> ${res.name}</div>
+            <div style="font-size: 24px; font-weight: 800; color: var(--color-primary);">${hoursLeft} <span style="font-size: 14px;">hrs left</span></div>
+            <div style="font-size: 12px; margin-top: 5px;">
+                Burn Rate: ~${hourlyRate.toFixed(1)} units/hr<br>
+                <span class="status-badge status-${status}">${status.toUpperCase()} RISK</span>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function toggleVolunteerForm() {
+    const content = document.getElementById('volunteerContent');
+    const icon = document.getElementById('volunteerToggleIcon');
+    if (content.classList.contains('expanded')) {
+        content.classList.remove('expanded');
+        icon.style.transform = 'rotate(0deg)';
+    } else {
+        content.classList.add('expanded');
+        icon.style.transform = 'rotate(180deg)';
+    }
+}
+
+// ResqLink AI Assistant (Ollama)
+async function getAISummary() {
+    const output = document.getElementById('aiSummaryOutput');
+    const loader = document.getElementById('aiLoader');
+    
+    if (!output || !loader) return;
+
+    // Gather latest sensor data from the UI
+    const sensorData = {
+        temperature: document.getElementById('hwTemp').textContent,
+        humidity: document.getElementById('hwHum').textContent,
+        soil: document.getElementById('hwSoil').textContent,
+        water: document.getElementById('hwWater').textContent,
+        seismic: document.getElementById('hwSeismic').textContent,
+        air: document.getElementById('hwAir').textContent,
+        rain: document.getElementById('hwRain').textContent,
+        lastUpdate: document.getElementById('hwLastUpdate').textContent
+    };
+
+    loader.style.display = 'flex';
+    output.style.opacity = '0.5';
+    output.textContent = "Analyzing patterns...";
+
+    try {
+        const response = await fetch('/ai-summary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sensorData })
+        });
+        
+        const data = await response.json();
+        if (data.summary) {
+            output.textContent = data.summary;
+        } else {
+            output.textContent = "AI could not generate a summary at this time.";
+        }
+        output.style.opacity = '1';
+    } catch (error) {
+        console.error("AI Assistant Error:", error);
+        output.textContent = "Offline: Please ensure Ollama is running locally with 'qwen3:8b'.";
+        output.style.opacity = '1';
+    } finally {
+        loader.style.display = 'none';
+    }
 }
