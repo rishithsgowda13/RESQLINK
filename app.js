@@ -275,10 +275,7 @@ function initDashboard() {
         if (activeRequestsSection) activeRequestsSection.style.display = 'block';
         if (resolvedRequestsSection) resolvedRequestsSection.style.display = 'block';
 
-        const liveSheetSection = document.getElementById('liveSheetSection');
-        if (liveSheetSection) liveSheetSection.style.display = 'block';
 
-        initSheetRefresh();
 
         document.getElementById('analyticsSection').style.display = 'block';
         document.getElementById('addResourceBtn').style.display = 'block';
@@ -1265,32 +1262,4 @@ function handleRiskSort(sortValue) {
         requests.sort((a, b) => (a.priorityScore || 0) - (b.priorityScore || 0));
     }
     renderRequests();
-}
-
-let sheetRefreshInterval = null;
-
-function initSheetRefresh() {
-    if (sheetRefreshInterval) clearInterval(sheetRefreshInterval);
-
-    // Refresh every 60 seconds
-    const interval = 60000;
-
-    sheetRefreshInterval = setInterval(() => {
-        const iframe = document.getElementById('liveSheetFrame');
-        if (iframe && iframe.parentElement.offsetParent !== null) { // Check if visible
-            // Reload iframe
-            iframe.src = iframe.src;
-
-            // Brief status update
-            const badge = document.getElementById('sheetRefreshStatus');
-            if (badge) {
-                badge.textContent = 'Refreshing...';
-                badge.className = 'status-badge status-allocated'; // Blueish
-                setTimeout(() => {
-                    badge.textContent = 'Auto-refresh active';
-                    badge.className = 'status-badge status-pending'; // Yellowish/Default
-                }, 2000);
-            }
-        }
-    }, interval);
 }
