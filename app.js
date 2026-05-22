@@ -405,11 +405,11 @@ function loadDummyData() {
 
     // Add addresses to dummy data
     const addresses = [
-        "Near VVCE Campus, Gokulam",
-        "KD Road Junction, Mysore",
-        "Temple Road, Gokulam 3rd Stage",
-        "Near Kalidasa Road",
-        "Industrial Area, Hebbal"
+        "Near PESCE Campus, Mandya",
+        "MC Road Junction, Mandya",
+        "Subash Nagar, Mandya",
+        "Near KSRTC Bus Stand, Mandya",
+        "Industrial Area, Mandya"
     ];
 
     requests = dummyRequests.map((req, index) => {
