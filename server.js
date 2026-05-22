@@ -44,6 +44,57 @@ const server = http.createServer((req, res) => {
 
     contentType = mimeTypes[extname] || 'application/octet-stream';
 
+    // Load .env variables
+    const envPath = path.join(__dirname, '.env');
+    let env = {};
+    if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        envContent.split('\n').forEach(line => {
+            const [key, value] = line.split('=');
+            if (key && value) env[key.trim()] = value.trim();
+        });
+    }
+
+    if (req.url === '/config') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            SUPABASE_URL: env.SUPABASE_URL,
+            SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY
+        }));
+        return;
+    }
+
+    if (req.url === '/ai-summary' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', async () => {
+            try {
+                const { sensorData } = JSON.parse(body);
+                const prompt = `As a Disaster Response AI Assistant, analyze these sensor readings and provide a 2-sentence tactical summary for the incident commander. Mention any critical threats.
+                Readings: ${JSON.stringify(sensorData)}`;
+
+                const ollamaResponse = await fetch('http://localhost:11434/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'qwen3:8b', // Using qwen3:8b as it's available
+                        prompt: prompt,
+                        stream: false
+                    })
+                });
+
+                const data = await ollamaResponse.json();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ summary: data.response }));
+            } catch (error) {
+                console.error("AI Error:", error);
+                res.writeHead(500);
+                res.end(JSON.stringify({ error: "AI processing failed" }));
+            }
+        });
+        return;
+    }
+
     fs.readFile(filePath, (error, content) => {
         if (error) {
             if (error.code == 'ENOENT') {
