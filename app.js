@@ -8,15 +8,30 @@ let baseMarker = null;
 let emergencyMarker = null;
 let selectedLocation = null;
 let currentRoute = null;
+let requestMarkers = [];
 let nextRequestId = 1005;
 let routeTimeout = null;
 let routeModalTimeout = null;
 
 const BASE_LOCATION = {
-    name: "VVCE-MYS",
-    lat: 12.3366,
-    lng: 76.6187
+    name: "PES Mandya Engineering College",
+    lat: 12.5238,
+    lng: 76.8974
 };
+
+const customBaseIcon = L.divIcon({
+    className: 'custom-div-icon',
+    html: "<div style='background-color:#5f7161; width:30px; height:30px; border-radius:50%; border:3px solid white; box-shadow:0 0 10px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; color:white; font-size: 16px;'><i class='fas fa-building'></i></div>",
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+});
+
+const customEmergencyIcon = L.divIcon({
+    className: 'custom-div-icon',
+    html: "<div style='background-color:#e74c3c; width:30px; height:30px; border-radius:50%; border:3px solid white; box-shadow:0 0 10px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; color:white; font-size: 16px;'><i class='fas fa-exclamation-triangle'></i></div>",
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+});
 
 const CREDENTIALS = {
     admin: { username: "1", password: "1", role: "Admin" },
@@ -435,7 +450,7 @@ function initMap(mapId = 'map', enableScrollZoom = true) {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng])
+    baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng], {icon: customBaseIcon})
         .addTo(map)
         .bindPopup('<b>' + BASE_LOCATION.name + '</b><br>Base Location');
 
@@ -446,7 +461,7 @@ function initMap(mapId = 'map', enableScrollZoom = true) {
             map.removeLayer(emergencyMarker);
         }
 
-        emergencyMarker = L.marker([e.latlng.lat, e.latlng.lng])
+        emergencyMarker = L.marker([e.latlng.lat, e.latlng.lng], {icon: customEmergencyIcon})
             .addTo(map)
             .bindPopup('<b>Emergency Location</b><br>Lat: ' + e.latlng.lat.toFixed(6) + '<br>Lng: ' + e.latlng.lng.toFixed(6));
     });
@@ -787,6 +802,35 @@ function renderRequests() {
         `;
         resolvedTable.appendChild(row);
     });
+
+    // Clear existing markers
+    requestMarkers.forEach(marker => {
+        if (map && marker) map.removeLayer(marker);
+    });
+    requestMarkers = [];
+
+    // Plot all requests on map
+    if (map) {
+        requests.forEach(request => {
+            let color = '#e74c3c'; // red default (pending high/critical)
+            if (request.status === 'resolved') color = '#10b981';
+            else if (request.status === 'allocated') color = '#3b82f6';
+            else if (request.mlPriorityClass === 'medium' || request.mlPriorityClass === 'low') color = '#f59e0b';
+
+            const reqIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style='background-color:${color}; width:26px; height:26px; border-radius:50%; border:2px solid white; box-shadow:0 0 8px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; color:white; font-size: 12px;'><i class='fas fa-hands-helping'></i></div>`,
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
+            });
+
+            const marker = L.marker([request.lat, request.lng], {icon: reqIcon})
+                .addTo(map)
+                .bindPopup(`<b>${request.requestId}</b><br>${request.resourceType}<br>Status: ${request.status.toUpperCase()}`);
+            
+            requestMarkers.push(marker);
+        });
+    }
 }
 
 function showRoute(requestId) {
@@ -822,12 +866,12 @@ function showRoute(requestId) {
                     fetchWeather(request.lat, request.lng);
 
                     if (baseMarker) baseMarker.remove();
-                    baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng])
+                    baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng], {icon: customBaseIcon})
                         .addTo(map)
                         .bindPopup('<b>' + BASE_LOCATION.name + '</b><br>Base Location');
 
                     if (emergencyMarker) emergencyMarker.remove();
-                    emergencyMarker = L.marker([request.lat, request.lng])
+                    emergencyMarker = L.marker([request.lat, request.lng], {icon: customEmergencyIcon})
                         .addTo(map)
                         .bindPopup('<b>Emergency Location</b><br>Lat: ' + request.lat.toFixed(6) + '<br>Lng: ' + request.lng.toFixed(6));
 
@@ -840,7 +884,7 @@ function showRoute(requestId) {
                             currentRoute = null;
                         }
                         if (baseMarker) baseMarker.remove();
-                        baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng])
+                        baseMarker = L.marker([BASE_LOCATION.lat, BASE_LOCATION.lng], {icon: customBaseIcon})
                             .addTo(map)
                             .bindPopup('<b>' + BASE_LOCATION.name + '</b><br>Base Location');
                         if (emergencyMarker) { emergencyMarker.remove(); emergencyMarker = null; }
