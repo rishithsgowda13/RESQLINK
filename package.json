@@ -1,0 +1,14 @@
+{
+  "name": "resqlink",
+  "version": "1.0.0",
+  "description": "Disaster Resource Management System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["disaster", "management", "emergency"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}

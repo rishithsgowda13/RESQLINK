@@ -1,0 +1,82 @@
+========================================================================
+             RESQLINK DISASTER MONITORING NODE: DEPLOYMENT GUIDE
+========================================================================
+
+This guide documents the technical architecture, sensor integration, and
+firmware specs for the newly integrated environmental telemetry sensors:
+1. NEO-6M / NEO-8M UART GPS Module
+2. BMP280 / BME280 Barometric Pressure & Altitude Sensor
+3. Pulse-type Anemometer (Wind Speed)
+4. Analog Wind Vane (Wind Direction)
+
+All features are integrated into the primary workspace, dashboard panels,
+and hardware replication files.
+
+------------------------------------------------------------------------
+1. DYNAMIC GEOLOCATION & COMMAND CENTER TRACKING
+------------------------------------------------------------------------
+* Module: NEO-6M / NEO-8M UART GPS Module
+* Physical Connection: GPIO 16 (RX2) and GPIO 17 (TX2)
+* Baud Rate: 9600 Baud (Hardware Serial 2)
+* Decoding Library: TinyGPS++
+* Database Schema: Updates the "sensor_logs" payload in Supabase with
+  real-time "latitude" and "longitude" values.
+* Map Synchronization: The administrative dashboard (app.js) subscribes
+  to incoming Supabase inserts. If valid latitude/longitude coordinates 
+  are detected, the Leaflet.js command map dynamically shifts and 
+  pins the base command station marker to the precise coordinates 
+  reported by the physical hardware.
+
+------------------------------------------------------------------------
+2. BAROMETRIC PRESSURE, ALTITUDE & STORM FORECASTING
+------------------------------------------------------------------------
+* Sensors: BMP280/BME280 (Pressure/Altitude) & Analog Wind Probes
+* Connections:
+  - BMP280: Connected via standard I2C (SDA -> GPIO 21, SCL -> GPIO 22)
+  - Anemometer (Wind Speed): GPIO 36 (Analog Input)
+  - Wind Vane (Direction): GPIO 39 (Analog Input)
+* Main Payload Fields:
+  - baro_pressure  : Measured in hPa (Hectopascals)
+  - altitude       : Calculated altitude in meters above sea level
+  - wind_speed     : Wind velocity mapped to km/h
+  - wind_direction : Heading mapped to cardinal degrees (0-360)
+* Emergency Threshold Triggers:
+  - High Wind Storm Alert: Initiated if wind velocity exceeds 60 km/h.
+  - Low-Pressure Warning: Initiated if barometric pressure falls below
+    normal limits (< 990 hPa), serving as a direct storm front predictor.
+  - Both warnings bypass default throttle delays, triggering immediate 
+    Supabase sync updates and emergency Telegram SOS dispatches.
+
+------------------------------------------------------------------------
+3. WEB DASHBOARD INTEGRATION
+------------------------------------------------------------------------
+New telemetry metrics cards have been successfully integrated into both
+front-end panels:
+
+* Administrative Command Panel (index.html):
+  - Adds individual real-time cards for: Soil Moisture, Air Quality, 
+    Rain Intensity, Pressure, Altitude, Wind Speed, Wind Direction, 
+    and GPS Location (spanned layout).
+  - Dynamic flashing animations in app.js display the values immediately
+    as database updates are synchronized.
+
+* User Live Telemetry Feed:
+  - Upgraded the grid to support a full 12-sensor layout covering all 
+    thermal, chemical, seismic, structural, micro-climate, storm, and
+    position metrics.
+
+------------------------------------------------------------------------
+4. HARDWARE FOLDER CONTENTS
+------------------------------------------------------------------------
+You can find all structural details and configurations duplicated inside
+the local workspace directory:
+
+📂 /Users/bharathkumara/Desktop/PROJECTS/RESQLINK/hardware
+ ├─ README.md        : Complete pinouts, operating voltage parameters,
+ │                     alert matrices, and dynamic idle-throttling formulas.
+ ├─ espcode.c++      : The complete physical low-level firmware program.
+ └─ deployment_guide.txt : This deployment instructions index.
+
+========================================================================
+                    RESQLINK DEPLOYMENT ENGINE V3
+========================================================================
